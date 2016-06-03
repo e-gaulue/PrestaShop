@@ -689,12 +689,15 @@ class CategoryCore extends ObjectModel
      * @param int         $random_number_products Number of products to return if random is activated
      * @param bool        $check_access           If set tot rue, check if the current customer
      *                                            can see products from this category
+     * @param bool        $include_subcat         If set to true, returns also sub-category products. Added
+     * @param bool        $order_by_cat_first     If set to true, order by category first then by 'order_by'.
+     *                                            Usefull if $include_subcat is set don't hurt either
      * @param Context|null $context
      *
      * @return array|int|false Products, number of products or false (no access)
      * @throws PrestaShopDatabaseException
      */
-    public function getProducts($id_lang, $p, $n, $order_by = null, $order_way = null, $get_total = false, $active = true, $random = false, $random_number_products = 1, $check_access = true, Context $context = null)
+    public function getProducts($id_lang, $p, $n, $order_by = null, $order_way = null, $get_total = false, $active = true, $random = false, $random_number_products = 1, $check_access = true, $include_subcat = false, $order_by_cat_first = true, Context $context = null)
     {
         if (!$context) {
             $context = Context::getContext();
@@ -707,13 +710,18 @@ class CategoryCore extends ObjectModel
         $front = in_array($context->controller->controller_type, array('front', 'modulefront'));
         $id_supplier = (int)Tools::getValue('id_supplier');
 
-        /** Return only the number of products */
+        /** Return only the number of products */        //Used if $include_subcat is set to see if also get product in child categories
+        $interval = Category::getInterval((int)$this->id);
+
         if ($get_total) {
-            $sql = 'SELECT COUNT(cp.`id_product`) AS total
+            $sql = 'SELECT COUNT(DISTINCT cp.`id_product`) AS total
 					FROM `'._DB_PREFIX_.'product` p
 					'.Shop::addSqlAssociation('product', 'p').'
 					LEFT JOIN `'._DB_PREFIX_.'category_product` cp ON p.`id_product` = cp.`id_product`
-					WHERE cp.`id_category` = '.(int)$this->id.
+					LEFT JOIN `'._DB_PREFIX_.'category` c ON (cp.`id_category` = c.`id_category`)
+					WHERE 
+					c.`nleft` '.($include_subcat ? '=' : '>=').(int)$interval['nleft'].'
+					AND c.`nright` '.($include_subcat ? '=' : '<=').(int)$interval['nright'].
                 ($front ? ' AND product_shop.`visibility` IN ("both", "catalog")' : '').
                 ($active ? ' AND product_shop.`active` = 1' : '').
                 ($id_supplier ? 'AND p.id_supplier = '.(int)$id_supplier : '');
@@ -743,6 +751,10 @@ class CategoryCore extends ObjectModel
 
         if ($order_by == 'price') {
             $order_by = 'orderprice';
+        }
+
+        if ($order_by_cat_first) {
+            $order_by = 'cp.id_category,'.$order_by;
         }
 
         $nb_days_new_product = Configuration::get('PS_NB_DAYS_NEW_PRODUCT');
@@ -776,8 +788,11 @@ class CategoryCore extends ObjectModel
 					AND il.`id_lang` = '.(int)$id_lang.')
 				LEFT JOIN `'._DB_PREFIX_.'manufacturer` m
 					ON m.`id_manufacturer` = p.`id_manufacturer`
+				LEFT JOIN `'._DB_PREFIX_.'category` c
+					ON (cp.`id_category` = c.`id_category`)
 				WHERE product_shop.`id_shop` = '.(int)$context->shop->id.'
-					AND cp.`id_category` = '.(int)$this->id
+					AND c.`nleft` '.($include_subcat ? '=' : '>=').(int)$interval['nleft'].'
+					AND c.`nright` '.($include_subcat ? '=' : '<=').(int)$interval['nright']
                     .($active ? ' AND product_shop.`active` = 1' : '')
                     .($front ? ' AND product_shop.`visibility` IN ("both", "catalog")' : '')
                     .($id_supplier ? ' AND p.id_supplier = '.(int)$id_supplier : '');
